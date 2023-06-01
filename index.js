@@ -1,15 +1,14 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
+const jwt = require('jsonwebtoken')
+require('dotenv').config()
 const app = express();
 const port = process.env.PORT || 5100;
 
 // middleware
 app.use(cors());
 app.use(express.json());
-
-// console.log(process.env.DB_password, process.env.DB_user);
 
 const uri = `mongodb+srv://${process.env.DB_user}:${process.env.DB_password}@cluster0.nwrzj29.mongodb.net/?retryWrites=true&w=majority`;
 
@@ -21,6 +20,21 @@ const client = new MongoClient(uri, {
         deprecationErrors: true,
     }
 });
+
+const verifyJWT = (req, res, next) => {
+    const authorization = req.headers.authorization;
+    if (!authorization) {
+        return req.status(401).send({ error: true, message: 'unauthorized access' })
+    }
+    const token = authorization.split(' ')[1];
+    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (error, decoded) => {
+        if (error) {
+            return res.status(401).send({ error: true, message: 'unauthorize access' });
+        }
+        req.decoded = decoded;
+        next();
+    })
+}
 
 async function run() {
     try {
@@ -35,14 +49,25 @@ async function run() {
             const result = await cursor.toArray();
             res.send(result);
         })
+        // JWT
 
+        app.post('/jwt', async (req, res) => {
+            const user = req.body;
+            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+                expiresIn: '1h'
+            })
+            res.send({ token });
+        })
+
+        // SERVICES ROUTES1
         app.get('/services/:id', async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) }
 
             const options = {
+                // Include only the `title` and `imdb` fields in the returned document
                 projection: { title: 1, price: 1, service_id: 1, img: 1 },
-            }
+            };
 
             const result = await serviceCollection.findOne(query, options);
             res.send(result);
@@ -50,8 +75,14 @@ async function run() {
 
         // bookings/Checkout 
 
-        app.get('/checkout', async (req, res) => {
-            console.log(req.query.email);
+        app.get('/checkout', verifyJWT, async (req, res) => {
+            const decoded = req.decoded;
+            console.log(decoded);
+
+            if(decoded.email !== req.query.email){
+                return req.status(403).send({error: 1, message: 'forbidden access'})
+            }
+
             let query = {};
             if (req.query?.email) {
                 query = { email: req.query.email }
@@ -97,8 +128,6 @@ async function run() {
     }
 }
 run().catch(console.dir);
-
-
 app.get('/', (req, res) => {
     res.send('Response is send to you that - Car Doctor Is Operating')
 })
